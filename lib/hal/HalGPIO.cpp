@@ -85,13 +85,12 @@ int HalGPIO::getBatteryPercentage() const {
 
     int newPct = BatteryMonitor::percentageFromMillivolts(static_cast<uint16_t>(smoothedMv));
 
-    // Rate-limit display changes: max ±2% per read cycle (every 30s) on battery.
-    // When charging, allow up to ±20% per cycle so the display catches up quickly.
-    // Prevents jarring jumps from SPI/BLE noise when on battery.
+    // Rate-limit drops only: max 2% decrease per read cycle (every 30s) on battery.
+    // Rising is uncapped so the display catches up quickly after charging.
+    // When charging via USB, drops are also uncapped (voltage actively rising anyway).
     if (cachedPct >= 0) {
-      const int maxStep = usbCharging ? 20 : 2;
-      if (newPct > cachedPct + maxStep) newPct = cachedPct + maxStep;
-      else if (newPct < cachedPct - maxStep) newPct = cachedPct - maxStep;
+      const int maxDrop = usbCharging ? 20 : 2;
+      if (newPct < cachedPct - maxDrop) newPct = cachedPct - maxDrop;
     }
 
     if (newPct != cachedPct) {

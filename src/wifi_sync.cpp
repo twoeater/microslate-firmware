@@ -60,6 +60,7 @@ static int syncLogCount = 0;
 
 static unsigned long lastHttpActivityMs = 0;
 static constexpr unsigned long SYNC_TIMEOUT_MS = 60000;  // 60s no HTTP → auto-disconnect
+static bool syncCompletePending = false;  // Set by handler, acted on in wifiSyncLoop
 
 // --- DONE state ---
 static unsigned long doneStartMs = 0;
@@ -81,6 +82,7 @@ static void resetSyncTracking() {
   filesSent = 0;
   filesReceived = 0;
   syncLogCount = 0;
+  syncCompletePending = false;
   for (int i = 0; i < MAX_LOG_LINES; i++) syncLog[i][0] = '\0';
 }
 
@@ -457,7 +459,7 @@ static void handleSyncComplete() {
   lastHttpActivityMs = millis();
   server->send(200, "text/plain", "OK");
   DBG_PRINTLN("[SYNC] PC signaled sync complete");
-  enterDoneState();
+  syncCompletePending = true;  // enterDoneState() called from wifiSyncLoop, not here
 }
 
 static void handleNotFound() {
@@ -682,8 +684,10 @@ void wifiSyncLoop() {
 
     case SyncState::SYNCING:
       if (server) server->handleClient();
-      // Safety timeout: 60s of no HTTP activity → auto-disconnect
-      if (millis() - lastHttpActivityMs > SYNC_TIMEOUT_MS) {
+      if (syncCompletePending) {
+        syncCompletePending = false;
+        enterDoneState();
+      } else if (millis() - lastHttpActivityMs > SYNC_TIMEOUT_MS) {
         DBG_PRINTLN("[SYNC] Timeout — no HTTP activity for 60s");
         enterDoneState();
       }

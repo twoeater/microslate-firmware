@@ -30,23 +30,11 @@ static Preferences prefs;
 bool autoReconnectEnabled = true;
 
 // Reconnection backoff
-static unsigned long reconnectDelay = 10000;  // Start at 10s (was 5s) — less aggressive
+static unsigned long reconnectDelay = 5000;   // 5s initial — gives keyboard time to release old connection after deep sleep
 static unsigned long lastReconnectAttempt = 0;
 static constexpr unsigned long MAX_RECONNECT_DELAY = 120000;  // Cap at 2min (was 60s)
 
-// BLE connection parameters (in 1.25ms units)
-// Active typing: 15-20ms interval — maximise keystroke responsiveness
-static constexpr uint16_t CONN_INTERVAL_ACTIVE_MIN = 12;   // 15ms
-static constexpr uint16_t CONN_INTERVAL_ACTIVE_MAX = 16;   // 20ms
-// Idle: 100-200ms interval — radio mostly sleeps between events
-static constexpr uint16_t CONN_INTERVAL_IDLE_MIN   = 80;   // 100ms
-static constexpr uint16_t CONN_INTERVAL_IDLE_MAX   = 160;  // 200ms
-static constexpr uint16_t CONN_SLAVE_LATENCY_ACTIVE = 0;   // No skipped events while typing
-static constexpr uint16_t CONN_SLAVE_LATENCY_IDLE   = 4;   // Keyboard can skip 4 events when idle
-static constexpr uint16_t CONN_SUPERVISION_TIMEOUT  = 400;  // 4s (10ms units)
-static constexpr unsigned long BLE_IDLE_SWITCH_MS   = 3000; // Switch to idle params after 3s no keystrokes
-
-// Activity tracking for adaptive connection parameters
+// Activity tracking (used by connect task to initialise idle timer)
 static unsigned long lastBleKeystrokeMs = 0;
 static bool bleConnIdleMode = false;
 
@@ -192,13 +180,13 @@ static class ClientCallbacks : public NimBLEClientCallbacks {
 
   bool onConnParamsUpdateRequest(NimBLEClient* pClient,
                                   const ble_gap_upd_params* params) override {
-    // Returning true makes NimBLE substitute pClient->m_connParams into the
-    // peer's request. We set m_connParams via updateConnParams() at connection
-    // time and when switching between active/idle modes — so just accept here.
-    // DO NOT call updateConnParams() from inside this callback: it calls
-    // ble_gap_update_params() re-entrantly from within the gap event handler,
-    // which crashes the stack (observed with Keychron keyboards).
-    return true;
+    // Reject the keyboard's connection parameter update request.
+    // Keychron keyboards send a conn param update on the first keypress (idle→active
+    // interval switch). Returning true makes NimBLE substitute our m_connParams into
+    // the response, which mismatches what the Keychron expects and causes an immediate
+    // crash/disconnect. Returning false tells the keyboard to keep the current params
+    // (30–50 ms interval negotiated at connect time), which works fine for all keyboards.
+    return false;
   }
 
   // Security callbacks (merged from NimBLESecurityCallbacks — removed in 2.x)
@@ -357,6 +345,19 @@ static void bleConnectTask(void* param) {
   DBG_PRINTF("[BLE-Task] Connecting to %s type=%d\n",
              keyboardAddress.c_str(), keyboardAddressType);
 
+  // Guard: if the link layer is already up (bleState flipped to DISCONNECTED spuriously
+  // while the BLE connection is still alive), don't call connect() again — that crashes
+  // the NimBLE stack. Just re-sync state and exit.
+  if (pClient && pClient->isConnected()) {
+    DBG_PRINTLN("[BLE-Task] Already connected - re-syncing state");
+    bleState = BLEState::CONNECTED;
+    lastBleKeystrokeMs = millis();
+    bleConnIdleMode = false;
+    connectTaskHandle = nullptr;
+    vTaskDelete(NULL);
+    return;
+  }
+
   // Create/reuse client
   if (!pClient) {
     pClient = NimBLEDevice::createClient();
@@ -408,7 +409,21 @@ static void bleConnectTask(void* param) {
     return;
   }
 
-  // Step 5: Store device and mark connected
+  // Step 5: Mark connected immediately so bleLoop doesn't start a second connect task.
+  // Do this BEFORE storePairedDevice (NVS write) to minimise the window where the link
+  // is live but bleState is still CONNECTING.
+  bleState = BLEState::CONNECTED;
+  reconnectDelay = 5000;  // Reset backoff after successful connection
+  bleConnIdleMode = false;
+  lastBleKeystrokeMs = millis();  // Start the 3s idle timer from now, not from boot
+  DBG_PRINTLN("[BLE-Task] Keyboard ready!");
+
+  // NOTE: updateConnParams() is intentionally NOT called here.  Calling it immediately
+  // after connecting triggers a reentrancy crash with Keychron keyboards (the keyboard
+  // sends its own BLE_GAP_EVENT_CONN_UPDATE_REQ at the same time).  The adaptive params
+  // logic in bleLoop() handles this safely from the main task after a stable delay.
+
+  // Store device to NVS for future reconnects
   std::string storedAddr, storedName;
   if (!getStoredDevice(storedAddr, storedName) || storedAddr != keyboardAddress) {
     std::string devName = keyboardAddress;
@@ -420,16 +435,6 @@ static void bleConnectTask(void* param) {
     }
     storePairedDevice(keyboardAddress, devName);
   }
-
-  // Request our preferred connection parameters (active typing mode)
-  pClient->updateConnParams(CONN_INTERVAL_ACTIVE_MIN, CONN_INTERVAL_ACTIVE_MAX,
-                             CONN_SLAVE_LATENCY_ACTIVE, CONN_SUPERVISION_TIMEOUT);
-  bleConnIdleMode = false;
-  lastBleKeystrokeMs = millis();
-
-  DBG_PRINTLN("[BLE-Task] Keyboard ready!");
-  bleState = BLEState::CONNECTED;
-  reconnectDelay = 10000;  // Reset backoff after successful connection
 
   connectTaskHandle = nullptr;
   vTaskDelete(NULL);
@@ -479,13 +484,20 @@ void bleSetup() {
   scan->setWindow(449);
   scan->setActiveScan(true);
 
-  // Check for stored device to auto-reconnect
+  // Check for stored device to auto-reconnect.
+  // Do NOT set connectToKeyboard = true here — instead prime lastReconnectAttempt so the
+  // auto-reconnect path in bleLoop() fires after the initial delay. This gives the keyboard
+  // time to expire its supervision timeout from the previous session (deep sleep drops the
+  // connection without a clean BLE disconnect; the Keychron holds the connection alive for
+  // up to CONN_SUPERVISION_TIMEOUT before releasing it). Connecting before that window
+  // causes NimBLE security-state mismatches that crash the stack.
   std::string storedAddr, storedName;
   if (getStoredDevice(storedAddr, storedName) && !storedAddr.empty()) {
     keyboardAddress = storedAddr;
     keyboardAddressType = prefs.getUChar("addrType", 0);
-    connectToKeyboard = true;
-    DBG_PRINTF("[BLE] Will reconnect to: %s type=%d\n", storedAddr.c_str(), keyboardAddressType);
+    lastReconnectAttempt = millis();  // Delay first attempt by reconnectDelay (5s)
+    DBG_PRINTF("[BLE] Will reconnect to: %s type=%d (in %lums)\n",
+               storedAddr.c_str(), keyboardAddressType, reconnectDelay);
   } else {
     bleState = BLEState::DISCONNECTED;
     DBG_PRINTLN("[BLE] No stored device");
@@ -508,23 +520,6 @@ void bleLoop() {
     connectToKeyboard = false;
     startConnectTask();
     return;
-  }
-
-  // Adaptive BLE connection parameters: fast interval while typing, slow when idle.
-  // Saves significant radio power during pauses between typing bursts.
-  if (bleState == BLEState::CONNECTED && pClient && pClient->isConnected()) {
-    unsigned long now = millis();
-    if (!bleConnIdleMode && (now - lastBleKeystrokeMs > BLE_IDLE_SWITCH_MS)) {
-      // No keystrokes for 3s — switch to slow polling to save radio power
-      pClient->updateConnParams(CONN_INTERVAL_IDLE_MIN, CONN_INTERVAL_IDLE_MAX,
-                                 CONN_SLAVE_LATENCY_IDLE, CONN_SUPERVISION_TIMEOUT);
-      bleConnIdleMode = true;
-    } else if (bleConnIdleMode && (now - lastBleKeystrokeMs <= BLE_IDLE_SWITCH_MS)) {
-      // Keystroke arrived — switch back to fast polling, no skipped events
-      pClient->updateConnParams(CONN_INTERVAL_ACTIVE_MIN, CONN_INTERVAL_ACTIVE_MAX,
-                                 CONN_SLAVE_LATENCY_ACTIVE, CONN_SUPERVISION_TIMEOUT);
-      bleConnIdleMode = false;
-    }
   }
 
   // Auto-reconnect to stored device (exponential backoff)

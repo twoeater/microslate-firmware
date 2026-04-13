@@ -1,4 +1,5 @@
 #include "BatteryMonitor.h"
+#include <Arduino.h>
 #include <cmath>
 #include <driver/adc.h>
 #include <esp_adc_cal.h>
@@ -18,13 +19,25 @@ uint16_t BatteryMonitor::readPercentage() const
 
 uint16_t BatteryMonitor::readMillivolts() const
 {
-    // Take multiple samples and average to reduce ADC noise/settling errors
-    constexpr int NUM_SAMPLES = 8;
-    uint32_t sum = 0;
+    // Take multiple samples with delays between them to span different noise windows,
+    // then use the median to reject outliers from SPI/BLE/charging noise.
+    constexpr int NUM_SAMPLES = 7;
+    uint16_t samples[NUM_SAMPLES];
     for (int i = 0; i < NUM_SAMPLES; i++) {
-        sum += adc1_get_raw(ADC1_CHANNEL_0);
+        samples[i] = adc1_get_raw(ADC1_CHANNEL_0);
+        if (i < NUM_SAMPLES - 1) delayMicroseconds(500);
     }
-    const int raw = sum / NUM_SAMPLES;
+    // Simple insertion sort for median
+    for (int i = 1; i < NUM_SAMPLES; i++) {
+        uint16_t key = samples[i];
+        int j = i - 1;
+        while (j >= 0 && samples[j] > key) {
+            samples[j + 1] = samples[j];
+            j--;
+        }
+        samples[j + 1] = key;
+    }
+    const int raw = samples[NUM_SAMPLES / 2];  // median
     const uint32_t mv = millivoltsFromRawAdc(raw);
     return static_cast<uint32_t>(mv * _dividerMultiplier);
 }

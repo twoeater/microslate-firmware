@@ -21,6 +21,7 @@ static bool connectToKeyboard = false;
 static std::string keyboardAddress = "";
 static uint8_t keyboardAddressType = 0;
 static uint8_t lastReport[8] = {0};
+static uint8_t inputReportId = 0;   // Non-zero if keyboard prefixes reports with a report ID
 
 // NVS storage for persistent pairing
 static Preferences prefs;
@@ -93,12 +94,18 @@ static void pruneStaleDevices() {
 // Keyboard notification callback
 static void onKeyboardNotify(NimBLERemoteCharacteristic* pRemChar,
                               uint8_t* pData, size_t length, bool isNotify) {
-  // Keyboard reports can be 7 or 8 bytes
-  // 8-byte: [Modifiers] [Reserved] [Key1-Key6]  (standard)
-  // 7-byte: [Modifiers] [Key1-Key6]              (compact, used by Keys-To-Go 2)
+  // Strip report ID prefix if the keyboard uses one (learned during HID discovery).
+  // e.g. 9-byte: [ReportID][Mod][Reserved][K1-K6]  →  strip to 8-byte standard
+  //      8-byte: [ReportID][Mod][K1-K6]             →  strip to 7-byte compact
+  if (inputReportId != 0 && length > 0 && pData[0] == inputReportId) {
+    pData++;
+    length--;
+  }
 
-  if (length != 7 && length != 8) {
-    DBG_PRINTF("[KB-Notify] Unexpected length %d, skipping\n", length);
+  // Must be 7 or 8 bytes after stripping. Consumer-control / media-key reports
+  // from other report IDs arrive here too — silently ignore them.
+  if (length < 7 || length > 8) {
+    DBG_PRINTF("[KB-Notify] Ignoring %d-byte report (not keyboard format)\n", (int)length);
     return;
   }
 
@@ -107,13 +114,12 @@ static void onKeyboardNotify(NimBLERemoteCharacteristic* pRemChar,
 
   // Normalize to 8-byte format: [Mod] [Reserved=0] [Key1-Key6]
   if (length == 8) {
-    // Already 8-byte format
     memcpy(newReport, pData, 8);
   } else {
-    // 7-byte format: convert to 8-byte by inserting reserved byte
+    // 7-byte compact: insert reserved byte
     newReport[0] = pData[0];  // Modifiers
     newReport[1] = 0;          // Reserved
-    memcpy(&newReport[2], &pData[1], 6);  // Key codes
+    memcpy(&newReport[2], &pData[1], 6);
   }
 
 #ifndef RELEASE_BUILD
@@ -186,16 +192,12 @@ static class ClientCallbacks : public NimBLEClientCallbacks {
 
   bool onConnParamsUpdateRequest(NimBLEClient* pClient,
                                   const ble_gap_upd_params* params) override {
-    // Don't blindly accept the keyboard's requested interval — enforce our floor.
-    uint16_t floorMin = bleConnIdleMode ? CONN_INTERVAL_IDLE_MIN : CONN_INTERVAL_ACTIVE_MIN;
-    uint16_t floorMax = bleConnIdleMode ? CONN_INTERVAL_IDLE_MAX : CONN_INTERVAL_ACTIVE_MAX;
-    uint16_t latency  = bleConnIdleMode ? CONN_SLAVE_LATENCY_IDLE : CONN_SLAVE_LATENCY_ACTIVE;
-    uint16_t itvlMin = (params->itvl_min > floorMin) ? params->itvl_min : floorMin;
-    uint16_t itvlMax = (params->itvl_max > floorMax) ? params->itvl_max : floorMax;
-    if (itvlMin > itvlMax) itvlMax = itvlMin;
-
-    pClient->updateConnParams(itvlMin, itvlMax,
-                               latency, CONN_SUPERVISION_TIMEOUT);
+    // Returning true makes NimBLE substitute pClient->m_connParams into the
+    // peer's request. We set m_connParams via updateConnParams() at connection
+    // time and when switching between active/idle modes — so just accept here.
+    // DO NOT call updateConnParams() from inside this callback: it calls
+    // ble_gap_update_params() re-entrantly from within the gap event handler,
+    // which crashes the stack (observed with Keychron keyboards).
     return true;
   }
 
@@ -260,6 +262,7 @@ static bool setupHidConnection() {
 
   // Find input report via Report Reference descriptor (type=1 means Input)
   pInputReportChar = nullptr;
+  inputReportId = 0;
   const auto& chars = pRemoteService->getCharacteristics(true);  // true = refresh from device
   DBG_PRINTF("[BLE] Found %d characteristics in HID service\n", (int)chars.size());
 
@@ -278,7 +281,8 @@ static bool setupHidConnection() {
                      (uint8_t)refData[0], (uint8_t)refData[1]);
           if ((uint8_t)refData[1] == 1) {
             pInputReportChar = chr;
-            DBG_PRINTLN("[BLE]     -> Selected as input report");
+            inputReportId = (uint8_t)refData[0];  // 0 = no ID prefix, non-zero = ID byte present
+            DBG_PRINTF("[BLE]     -> Selected as input report (reportId=%d)\n", inputReportId);
             break;
           }
         }
@@ -437,7 +441,10 @@ static void startConnectTask() {
     DBG_PRINTLN("[BLE] Connect task already running");
     return;
   }
-  xTaskCreate(bleConnectTask, "ble_conn", 8192, NULL, 1, &connectTaskHandle);
+  // 20480 bytes: Logitech has a complex service tree (keyboard + media + battery reports
+  // + many descriptors). NimBLE 2.x uses more per-call stack than 1.4.x — 12288 was
+  // sufficient before but overflows during full service discovery on the Logitech.
+  xTaskCreate(bleConnectTask, "ble_conn", 20480, NULL, 1, &connectTaskHandle);
 }
 
 // --- Public API ---
@@ -448,12 +455,20 @@ uint32_t getCurrentPasskey() {
 
 void bleSetup() {
   NimBLEDevice::init("MicroSlate");
-  // bonding=true, MITM=FALSE, SC=FALSE - "Just Works" pairing
+  // bond=true, MITM=false (we don't require it), SC=false (legacy compat for Logitech etc.)
+  // DISPLAY_YESNO: we can show a number and confirm — lets keyboards that *do* want
+  // numeric comparison (Apple Magic Keyboard, etc.) initiate it while still falling
+  // back to "Just Works" for keyboards that don't need it.
   NimBLEDevice::setSecurityAuth(true, false, false);
-  // NO_INPUT_OUTPUT forces "Just Works" pairing (no passkey)
+  // NO_INPUT_OUTPUT = "Just Works" pairing — works for both Logitech and Keychron
+  // since MITM=false means we never require authenticated pairing regardless of IO cap.
+  // DISPLAY_YESNO was tried for Keychron but broke Logitech (bond/security-state mismatch
+  // in NimBLE 2.x caused crashes on reconnect). Just Works is sufficient for all targets.
   NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
-  NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
-  NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
+  // ENC-only key distribution — omit ID (IRK) which some keyboards don't support
+  // and which caused bond-validation failures after the security param change.
+  NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC);
+  NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC);
   NimBLEDevice::setPower(-9);  // -9dBm — lowest verified working power level
 
   prefs.begin("ble_kb", false);

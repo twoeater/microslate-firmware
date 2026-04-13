@@ -287,6 +287,7 @@ static void dispatchEvent(const KeyEvent& event) {
         screenDirty = true;
       } else if (event.keyCode == HID_KEY_ENTER) {
         if (mainMenuSelection == 0) {
+          refreshFileList();
           currentState = UIState::FILE_BROWSER;
           screenDirty = true;
         } else if (mainMenuSelection == 1) {

@@ -857,3 +857,4 @@ void drawSyncScreen(GfxRenderer& renderer, HalGPIO& gpio) {
 
   renderer.beginRefresh(HalDisplay::FAST_REFRESH);
 }
+

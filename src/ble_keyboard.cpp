@@ -367,6 +367,10 @@ static void bleConnectTask(void* param) {
 
   // Step 1: Connect (blocks this task, main loop continues)
   NimBLEAddress addr(keyboardAddress, keyboardAddressType);
+  // Delete any stored bond before connecting — forces a fresh "Just Works" pairing
+  // instead of an encrypted reconnect. Prevents a NimBLE security-state crash when
+  // the keyboard still holds a stale connection from a previous unclean disconnect.
+  NimBLEDevice::deleteBond(addr);
   if (!pClient->connect(addr, true)) {
     DBG_PRINTLN("[BLE-Task] Connection failed");
     bleState = BLEState::DISCONNECTED;

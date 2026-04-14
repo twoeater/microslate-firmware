@@ -19,7 +19,6 @@ extern bool deleteConfirmPending;
 extern WritingMode writingMode;
 
 // External functions
-bool getStoredDevice(std::string& address, std::string& name);
 uint32_t getCurrentPasskey();
 bool isDeviceScanning();
 uint32_t getScanAgeMs();
@@ -51,6 +50,7 @@ extern int mainMenuSelection;
 extern int selectedFileIndex;
 extern int settingsSelection;
 extern int bluetoothDeviceSelection;
+extern int pairedKeyboardSelection;
 extern Orientation currentOrientation;
 extern int charsPerLine;
 extern char renameBuffer[];
@@ -474,9 +474,9 @@ void drawSettingsMenu(GfxRenderer& renderer, HalGPIO& gpio) {
   drawBattery(renderer, gpio);
   clippedLine(renderer, 5, 32, sw - 5, 32, !darkMode);
 
-  // Setting items: Orientation, Dark Mode, Writing Mode, Bluetooth, Clear Paired
+  // Setting items: Orientation, Dark Mode, Writing Mode, Bluetooth, Paired Keyboards
   static const char* labels[] = {
-    "Orientation", "Dark Mode", "Writing Mode", "Bluetooth", "Clear Paired"
+    "Orientation", "Dark Mode", "Writing Mode", "Bluetooth", "Paired Keyboards"
   };
   const int SETTINGS_COUNT = 5;
 
@@ -517,12 +517,10 @@ void drawSettingsMenu(GfxRenderer& renderer, HalGPIO& gpio) {
         case WritingMode::PAGINATION: strcpy(val, "Pagination"); break;
       }
     } else if (i == 4) {
-      std::string storedAddr, storedName;
-      if (getStoredDevice(storedAddr, storedName)) {
-        snprintf(val, sizeof(val), "%s", storedName.c_str());
-      } else {
-        strcpy(val, "None");
-      }
+      int kbCount = getPairedKeyboardCount();
+      if (kbCount == 0) strcpy(val, "None");
+      else if (kbCount == 1) strcpy(val, "1 keyboard");
+      else snprintf(val, sizeof(val), "%d keyboards", kbCount);
     }
 
     if (val[0] != '\0') {
@@ -669,6 +667,60 @@ void drawBluetoothSettings(GfxRenderer& renderer, HalGPIO& gpio) {
     clippedLine(renderer, 10, sh - bm, sw - 10, sh - bm, tc);
     drawClippedText(renderer, FONT_SMALL, 20, sh - bm + 12,
                     "Enter:Connect  Right:Scan  Left:Disconnect  Esc:Back", 0, tc);
+  }
+
+  renderer.beginRefresh(HalDisplay::FAST_REFRESH);
+}
+
+void drawPairedKeyboardsMenu(GfxRenderer& renderer, HalGPIO& gpio) {
+  renderer.clearScreen();
+  int sw = renderer.getScreenWidth();
+  int sh = renderer.getScreenHeight();
+  bool tc = !darkMode;
+
+  if (darkMode) clippedFillRect(renderer, 0, 0, sw, sh, true);
+
+  drawClippedText(renderer, FONT_SMALL, 10, 5, "Paired Keyboards", 0, tc, EpdFontFamily::BOLD);
+  drawBattery(renderer, gpio);
+  clippedLine(renderer, 5, 32, sw - 5, 32, tc);
+
+  int count = getPairedKeyboardCount();
+  if (count == 0) {
+    drawClippedText(renderer, FONT_UI, 20, 60, "No paired keyboards", 0, tc);
+    drawClippedText(renderer, FONT_SMALL, 20, 85, "Go to Bluetooth to scan and connect", 0, tc);
+  } else {
+    std::string currentAddr = getCurrentDeviceAddress();
+    int lineH = 38;
+    int listTop = 44;
+
+    for (int i = 0; i < count; i++) {
+      std::string addr, name; uint8_t addrType;
+      getPairedKeyboard(i, addr, name, addrType);
+
+      int yPos = listTop + (i * lineH);
+      bool sel = (i == pairedKeyboardSelection);
+      bool active = (!currentAddr.empty() && currentAddr == addr);
+
+      if (sel) {
+        clippedFillRect(renderer, 5, yPos - 4, sw - 10, lineH - 4, tc);
+        drawClippedText(renderer, FONT_UI, 15, yPos, name.c_str(), sw - 90, !tc);
+      } else {
+        drawClippedText(renderer, FONT_UI, 15, yPos, name.c_str(), sw - 90, tc);
+      }
+
+      if (active) {
+        drawRightText(renderer, FONT_SMALL, sw - 10, yPos + 2, "active", sel ? !tc : tc);
+      } else if (!active && i == getLastUsedKeyboardIndex() && currentAddr.empty()) {
+        drawRightText(renderer, FONT_SMALL, sw - 10, yPos + 2, "last", sel ? !tc : tc);
+      }
+    }
+  }
+
+  constexpr int bm = 52;
+  if (sh > bm + 30) {
+    clippedLine(renderer, 10, sh - bm, sw - 10, sh - bm, tc);
+    drawClippedText(renderer, FONT_SMALL, 10, sh - bm + 8,  "Enter:Connect  D:Forget", 0, tc);
+    drawClippedText(renderer, FONT_SMALL, 10, sh - bm + 22, "Left:Disconnect  Esc:Back", 0, tc);
   }
 
   renderer.beginRefresh(HalDisplay::FAST_REFRESH);

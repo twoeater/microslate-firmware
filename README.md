@@ -184,11 +184,20 @@ Back up all notes from the device to your PC over WiFi. The device and PC must b
    ```bash
    pip install requests
    ```
-3. Double-click **`sync\install_sync.bat`** to install and start the sync script
+3. Run the installer for your platform:
 
-That's it. The script starts immediately and will run silently in the background on every login — no window, no tray icon. When a sync completes, a Windows notification pops up listing the files that were downloaded. Notes are saved to `Documents\MicroSlate Notes\` by default (edit `LOCAL_DIR` in `microslate_sync.py` to change).
+**Windows** — double-click **`sync\install_sync.bat`**
 
-To stop auto-start later, double-click **`sync\uninstall_sync.bat`**.
+**macOS / Linux** — run in a terminal:
+```bash
+chmod +x sync/install_sync.sh && sync/install_sync.sh
+```
+
+That's it. The script starts immediately and will run silently in the background on every login. When a sync completes, a desktop notification lists the files that were downloaded (Windows balloon, macOS notification, or Linux `notify-send`). Notes are saved to `Documents/MicroSlate Notes/` by default (edit `LOCAL_DIR` in `microslate_sync.py` to change).
+
+To stop auto-start later:
+- **Windows** — double-click **`sync\uninstall_sync.bat`**
+- **macOS / Linux** — run `sync/uninstall_sync.sh`
 
 #### Syncing
 
@@ -196,11 +205,11 @@ To stop auto-start later, double-click **`sync\uninstall_sync.bat`**.
 2. **First time:** pick your WiFi network and enter the password. The device asks to save credentials.
 3. **After that:** the device auto-connects — just press Sync and wait
 4. The device syncs automatically once connected — a progress log is shown on screen
-5. When done, the device shows a summary and turns WiFi off automatically. A Windows notification appears listing the downloaded files
+5. When done, the device shows a summary and turns WiFi off automatically. A desktop notification lists the downloaded files
 
 If the sync script isn't running, you can start it manually:
 ```bash
-python sync/microslate_sync.py
+python3 sync/microslate_sync.py
 ```
 
 #### How sync works
@@ -239,9 +248,11 @@ xteink-writer-firmware/
 │   ├── wifi_sync.cpp     — WiFi sync server and state machine
 │   └── config.h          — enums, buffer sizes, constants
 ├── sync/
-│   ├── microslate_sync.py   — PC sync script (Python)
+│   ├── microslate_sync.py   — PC sync script (Python, cross-platform)
 │   ├── install_sync.bat     — register auto-start on Windows login
-│   └── uninstall_sync.bat   — remove auto-start task
+│   ├── uninstall_sync.bat   — remove auto-start on Windows
+│   ├── install_sync.sh      — register auto-start on macOS / Linux
+│   └── uninstall_sync.sh    — remove auto-start on macOS / Linux
 ├── lib/                  — all hardware/display libraries (bundled)
 │   ├── GfxRenderer/
 │   ├── EpdFont/

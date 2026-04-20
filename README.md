@@ -29,23 +29,13 @@ A dedicated writing firmware for the **Xteink X4** e-paper device. Pairs with an
 
 ## Installation
 
-### Option 1 — Flash a pre-built binary (recommended)
+### Option 1 — Browser installer (recommended)
 
-No build tools required. Works on Windows, Mac, and Linux.
+No software required. Works on Windows and Mac in Chrome or Edge.
 
-1. Download the latest `microslate-vX.X.X.bin` from the [Releases](https://github.com/Josh-writes/microslate-firmware/releases) page
-2. Install esptool:
-   ```bash
-   pip install esptool
-   ```
-3. Connect the Xteink X4 via USB and flash:
-   ```bash
-   esptool.py --port PORT write_flash 0x0 microslate-vX.X.X.bin
-   ```
-   Replace `PORT` with your device port:
-   - **Windows:** `COM3`, `COM4`, etc. (check Device Manager)
-   - **Mac:** `/dev/tty.usbmodem*` or `/dev/tty.wchusbserial*`
-   - **Linux:** `/dev/ttyUSB0` or `/dev/ttyACM0`
+**[Install MicroSlate → typeslate.com/tools/microslate](https://typeslate.com/tools/microslate/)**
+
+Connect your Xteink X4 via USB, click **Install MicroSlate**, and select the device from the browser popup. Takes about 2 minutes.
 
 ### Option 2 — Build from source
 

@@ -49,3 +49,17 @@ jobs:
         with:
           files: microslate-${{ github.ref_name }}.bin
           generate_release_notes: true
+
+      - name: Update firmware on typeslate website
+        env:
+          WEBSITE_PAT: ${{ secrets.WEBSITE_PAT }}
+        run: |
+          git clone https://x-access-token:${WEBSITE_PAT}@github.com/josh-websites/typeslate-website.git website
+          cp microslate-${{ github.ref_name }}.bin website/tools/microslate/firmware/latest.bin
+          echo '{"version":"${{ github.ref_name }}"}' > website/tools/microslate/firmware/version.json
+          cd website
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tools/microslate/firmware/latest.bin tools/microslate/firmware/version.json
+          git commit -m "Update MicroSlate firmware to ${{ github.ref_name }}"
+          git push

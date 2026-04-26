@@ -20,6 +20,8 @@ A dedicated writing firmware for the **Xteink X4** e-paper device. Pairs with an
 - **Power Management** — ESP-IDF light sleep between loop iterations (CPU drops to 10MHz), BLE modem sleep keeps the radio alive, SD card sleeps between accesses, display analog circuits power down after each refresh, and the device enters deep sleep after 5 minutes of inactivity
 - **WiFi Sync** — one-button backup of all notes to your PC over WiFi. Saves network credentials for instant reconnect. Read-only server — nothing on the device can be modified over the network
 - **Standalone Build** — all libraries are bundled in the repo; no sibling projects required
+- **Dual-Boot** — optional combined firmware that includes CrossPoint (an e-reader) in a second OTA slot. A "CrossPoint" entry appears in the main menu; selecting it reboots into the reader. CrossPoint gains a reciprocal "MicroSlate" entry. Both apps work normally when flashed standalone.
+- **Settings Backup** — BLE pairing info, WiFi credentials, and UI preferences are backed up to the SD card as JSON files. They are silently restored after a firmware flash so you don't need to re-pair your keyboard or re-enter WiFi passwords.
 
 ## Hardware Requirements
 
@@ -35,7 +37,7 @@ No software required. Works on Windows and Mac in Chrome or Edge.
 
 **[Install MicroSlate → typeslate.com/tools/microslate](https://typeslate.com/tools/microslate/)**
 
-Connect your Xteink X4 via USB, click **Install MicroSlate**, and select the device from the browser popup. Takes about 2 minutes.
+Connect your Xteink X4 via USB and click **Install MicroSlate** for the standalone firmware, or **Install Dual-Boot** to get MicroSlate + CrossPoint on the same device. Takes about 2 minutes.
 
 ### Option 2 — Build from source
 
@@ -79,7 +81,7 @@ The device remembers paired keyboards (up to 4) and reconnects automatically on 
 | Left / Right | Also navigate (convenient in landscape) |
 | Enter | Select |
 
-Options: **Browse Notes**, **New Note**, **Settings**, **Sync**
+Options: **Browse Notes**, **New Note**, **Settings**, **Sync** — and **CrossPoint** if the dual-boot firmware is installed
 
 ### File Browser
 
@@ -240,6 +242,7 @@ Files are fully compatible with any text editor on a computer. To add notes manu
 xteink-writer-firmware/
 ├── src/
 │   ├── main.cpp          — setup, main loop, shared UI state
+│   ├── sd_backup.h       — inline SD/JSON helpers for NVS backup and restore
 │   ├── ble_keyboard.cpp  — BLE scanning, pairing, HID report handling
 │   ├── input_handler.cpp — keyboard event queue and UI state dispatch
 │   ├── text_editor.cpp   — text buffer and cursor management

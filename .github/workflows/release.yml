@@ -47,14 +47,11 @@ jobs:
             0x10000 .pio/build/xteink_x4/firmware.bin
 
           if curl -f -o crosspoint-app.bin https://typeslate.com/tools/crosspoint/firmware/app.bin; then
-            GEN_PART=$(find ~/.platformio -name "gen_esp32part.py" | head -1)
-            python "$GEN_PART" partitions-crosspoint.csv crosspoint-partitions.bin
-
             esptool.py --chip esp32c3 merge_bin \
               --flash_mode dio --flash_size 16MB \
               -o dualboot-${{ github.ref_name }}.bin \
               0x0      .pio/build/xteink_x4/bootloader.bin \
-              0x8000   crosspoint-partitions.bin \
+              0x8000   .pio/build/xteink_x4/partitions.bin \
               0xe000   "$BOOT_APP0" \
               0x10000  crosspoint-app.bin \
               0x650000 .pio/build/xteink_x4/firmware.bin

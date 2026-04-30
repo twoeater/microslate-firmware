@@ -1,6 +1,6 @@
 # MicroSlate
 
-A dedicated writing firmware for the **Xteink X4** e-paper device. Pairs with any Bluetooth keyboard and saves notes to MicroSD.
+A dedicated writing firmware for the **Xteink X4** e-paper device. Pairs with any **Bluetooth LE (BLE)** keyboard and saves notes to MicroSD.
 
 ## Features
 
@@ -27,7 +27,7 @@ A dedicated writing firmware for the **Xteink X4** e-paper device. Pairs with an
 
 - Xteink X4 e-paper device (ESP32-C3, 800x480 display, physical buttons, SD slot)
 - MicroSD card formatted as FAT32
-- A Bluetooth HID keyboard
+- A **Bluetooth LE (BLE)** HID keyboard — confirm your keyboard uses BLE before pairing. The ESP32-C3 hardware has no Classic Bluetooth (BR/EDR) radio; Classic BT keyboards cannot connect regardless of firmware settings.
 
 ## Installation
 
@@ -273,6 +273,7 @@ xteink-writer-firmware/
 **Keyboard not showing in scan**
 - Make sure the keyboard is in pairing mode and not connected to another device
 - Press Right to re-scan after switching the keyboard to pairing mode
+- **Classic Bluetooth keyboards will never appear** — the ESP32-C3 only has a BLE radio. This is a hardware constraint, not a software limitation. Verify your keyboard uses BLE before debugging further (check the manufacturer's specs; most keyboards sold after 2014 use BLE, but some older or multi-device keyboards still use Classic Bluetooth)
 
 **Physical buttons not responding**
 - BLE scanning can occasionally interfere with the ADC button reads

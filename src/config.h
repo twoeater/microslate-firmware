@@ -72,6 +72,9 @@ struct OtaAppEntry {
 extern OtaAppEntry otaApps[];
 extern int otaAppCount;
 
+// --- Input Mode ---
+extern bool isKoreanMode;
+
 // --- Buffer/Queue Sizes ---
 static constexpr size_t TEXT_BUFFER_SIZE = 16384;
 static constexpr int MAX_FILES = 50;

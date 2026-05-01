@@ -3,6 +3,7 @@
 #include "file_manager.h"
 #include "ble_keyboard.h"
 #include "wifi_sync.h"
+#include "hangul_engine.h"
 
 #include <Arduino.h>
 #include <SDCardManager.h>
@@ -33,6 +34,9 @@ static volatile bool queueFull = false;
 
 // --- CapsLock state ---
 static bool capsLockOn = false;
+
+// --- Korean Input Engine ---
+static HangulEngine hangulEngine;
 
 // Where to return after title edit is confirmed or cancelled
 static UIState renameReturnState = UIState::FILE_BROWSER;
@@ -137,6 +141,14 @@ char hidToAscii(uint8_t hid, uint8_t modifiers) {
 static void handleEditorKey(uint8_t keyCode, uint8_t modifiers) {
   // Ctrl shortcuts
   if (isCtrl(modifiers)) {
+    if (keyCode == HID_KEY_SPACE) {
+      isKoreanMode = !isKoreanMode;
+      if (!isKoreanMode && hangulEngine.isComposing()) {
+        hangulEngine.commit();
+      }
+      screenDirty = true;
+      return;
+    }
     if (keyCode == HID_KEY_S) {
       saveCurrentFile();
       screenDirty = true;
@@ -213,13 +225,32 @@ static void handleEditorKey(uint8_t keyCode, uint8_t modifiers) {
     case HID_KEY_DOWN:      editorMoveCursorDown();  screenDirty = true; return;
     case HID_KEY_HOME:      editorMoveCursorHome();  screenDirty = true; return;
     case HID_KEY_END:       editorMoveCursorEnd();   screenDirty = true; return;
-    case HID_KEY_BACKSPACE: editorDeleteChar();      screenDirty = true; return;
+    case HID_KEY_BACKSPACE:
+      if (isKoreanMode && hangulEngine.isComposing()) {
+        hangulEngine.backspace();
+      } else {
+        editorDeleteChar();
+      }
+      screenDirty = true; return;
     case HID_KEY_DELETE:    editorDeleteForward();   screenDirty = true; return;
   }
 
   // CapsLock toggle
   if (keyCode == HID_KEY_CAPSLOCK) {
     capsLockOn = !capsLockOn;
+    return;
+  }
+
+  // Korean input mode
+  if (isKoreanMode) {
+    hangulEngine.inputKey(keyCode, isShift(modifiers));
+    if (hangulEngine.isComposing()) {
+      const uint8_t* utf8Bytes;
+      size_t utf8Len;
+      utf8Bytes = hangulEngine.getUtf8Bytes(utf8Len);
+      editorInsertUtf8(utf8Bytes, utf8Len);
+    }
+    screenDirty = true;
     return;
   }
 

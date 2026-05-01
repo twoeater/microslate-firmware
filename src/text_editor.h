@@ -13,6 +13,7 @@ int editorGetCursorPosition();
 
 // Editing operations
 void editorInsertChar(char c);
+void editorInsertUtf8(const uint8_t* utf8Bytes, size_t byteLen);
 void editorDeleteChar();     // Backspace
 void editorDeleteForward();  // Delete key
 

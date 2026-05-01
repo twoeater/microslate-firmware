@@ -4,6 +4,7 @@
 #include "file_manager.h"
 #include "ble_keyboard.h"
 #include "wifi_sync.h"
+#include "hangul_engine.h"
 
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
@@ -19,6 +20,9 @@ extern bool deleteConfirmPending;
 extern WritingMode writingMode;
 extern FontSize fontSize;
 extern bool showWordCount;
+
+// External Korean input
+extern bool isKoreanMode;
 
 // External functions
 uint32_t getCurrentPasskey();
@@ -162,6 +166,13 @@ static void drawBleStatus(GfxRenderer& renderer, int x, int y) {
     case BLEState::DISCONNECTED: status = "KB Disconnected"; break;
   }
   drawClippedText(renderer, FONT_SMALL, x, y, status, 0, !darkMode);
+}
+
+// Helper: draw Korean mode indicator
+static void drawKoreanIndicator(GfxRenderer& renderer, int x, int y, bool tc) {
+  if (isKoreanMode) {
+    drawClippedText(renderer, FONT_SMALL, x, y, "한글", 0, tc);
+  }
 }
 
 // ===========================================================================
@@ -327,8 +338,14 @@ static int drawEditorHeader(GfxRenderer& renderer, HalGPIO& gpio, int sw, bool t
   // Mode indicator — fixed position, right-anchored before battery
   const char* modeInd = getModeIndicator();
   int modeW = renderer.getTextAdvanceX(FONT_SMALL, modeInd);
-  int modeX = sw - 70 - modeW;
+  int indicatorW = isKoreanMode ? renderer.getTextAdvanceX(FONT_SMALL, "한글") + 5 : 0;
+  int modeX = sw - 70 - modeW - indicatorW;
   drawClippedText(renderer, FONT_SMALL, modeX, 5, modeInd, modeW + 5, tc);
+
+  // Korean mode indicator
+  if (isKoreanMode) {
+    drawClippedText(renderer, FONT_SMALL, modeX + modeW + 5, 5, "한글", 0, tc);
+  }
 
   // Word count — drawn to the left of the mode indicator
   int titleMaxW = modeX - 10;

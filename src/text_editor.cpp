@@ -1,4 +1,5 @@
 #include "text_editor.h"
+#include "hangul_engine.h"
 #include <cstring>
 #include <algorithm>
 
@@ -6,6 +7,9 @@
 static char textBuffer[TEXT_BUFFER_SIZE];
 static size_t textLength = 0;
 static int cursorPosition = 0;
+
+// --- Korean Input Mode ---
+bool isKoreanMode = false;
 
 // --- File metadata ---
 static char currentFile[MAX_FILENAME_LEN] = "";
@@ -161,6 +165,26 @@ void editorInsertChar(char c) {
   textBuffer[cursorPosition] = c;
   cursorPosition++;
   textLength++;
+  textBuffer[textLength] = '\0';
+  unsavedChanges = true;
+  lineBreaksDirty = true;
+
+  editorRecalculateLines();
+  ensureCursorVisible(storedVisibleLines);
+}
+
+void editorInsertUtf8(const uint8_t* utf8Bytes, size_t byteLen) {
+  if (textLength + byteLen >= TEXT_BUFFER_SIZE - 1) return;
+
+  // Shift text right
+  for (int i = (int)textLength; i >= cursorPosition; i--) {
+    textBuffer[i + byteLen] = textBuffer[i];
+  }
+  for (size_t i = 0; i < byteLen; i++) {
+    textBuffer[cursorPosition + i] = utf8Bytes[i];
+  }
+  cursorPosition += byteLen;
+  textLength += byteLen;
   textBuffer[textLength] = '\0';
   unsavedChanges = true;
   lineBreaksDirty = true;
